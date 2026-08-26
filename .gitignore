@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+
+# PyInstaller 构建产物
+build/
+dist/
+*.spec.bak
+
+# 运行日志
+spy_error.log
+
+# 打包出的 exe（大文件，用 GitHub Release 发布）
+ui-spy.exe
+
+# venv
+.venv*/
