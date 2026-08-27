@@ -4,13 +4,18 @@ import uiautomation as auto
 import util
 
 
-def lock_control(x, y, top_only=False):
-    """锁定鼠标 (x,y) 处的控件；top_only=True 锁定顶层窗口。"""
+def lock_control(x, y, top_only=False, mode="hit"):
+    """锁定鼠标 (x,y) 处的控件。
+    mode: "hit"=命中测试（普通应用）；"walk"=全树遍历（微信 DirectUI）。
+    top_only=True 直接锁定顶层窗口。
+    """
     if top_only:
         import win32gui
         hwnd = win32gui.WindowFromPoint((int(x), int(y)))
         return auto.ControlFromHandle(hwnd) if hwnd else auto.ControlFromPoint(x, y)
-    return util.deepest_at_point(x, y)
+    if mode in ("walk", "全树遍历"):
+        return util.deepest_at_point(x, y)
+    return util.hit_test_at_point(x, y)
 
 
 def matches_name(c, query):

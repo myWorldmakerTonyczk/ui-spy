@@ -135,8 +135,15 @@ class SpyApp:
         bottom = tk.Frame(self.root)
         bottom.pack(fill='x', padx=8, pady=(4, 8))
         bottom.columnconfigure(0, weight=1)
+        mode_frame = tk.Frame(bottom)
+        mode_frame.grid(row=0, column=0, sticky='w')
         self.top_only_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(bottom, text="锁定顶层窗口", variable=self.top_only_var).grid(row=0, column=0, sticky='w')
+        ttk.Checkbutton(mode_frame, text="锁定顶层窗口", variable=self.top_only_var).pack(side='left')
+        tk.Label(mode_frame, text=" 匹配:", font=('Microsoft YaHei', 9)).pack(side='left')
+        self.mode_var = tk.StringVar(value="命中测试")
+        ttk.Combobox(mode_frame, textvariable=self.mode_var, state='readonly',
+                     values=("命中测试", "全树遍历"), width=8,
+                     font=('Microsoft YaHei', 9)).pack(side='left')
         self.target_btn = tk.Button(bottom, text="🔍", font=('Segoe UI Emoji', 11),
                                     width=3, cursor='hand2')
         self.target_btn.grid(row=0, column=1, padx=2)
@@ -197,7 +204,7 @@ class SpyApp:
         self.mag.withdraw()
         ctypes.windll.user32.ShowCursor(True)
         try:
-            c = service.lock_control(x, y, self.top_only_var.get())
+            c = service.lock_control(x, y, self.top_only_var.get(), self.mode_var.get())
             self.root_control = c
             self.hl_path = [c]       # 控制线路起点 = 来源控件
             self._build_tree(c)

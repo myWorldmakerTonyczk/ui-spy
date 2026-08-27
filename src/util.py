@@ -84,8 +84,24 @@ def find_path_child(kids, source):
     return best
 
 
+def hit_test_at_point(x, y):
+    """命中测试模式（普通应用）：用 UIA 自带的 ElementFromPoint，provider 直接回答该点是什么。"""
+    try:
+        return auto.ControlFromPoint(x, y)
+    except Exception:
+        import win32gui
+        hwnd = win32gui.WindowFromPoint((int(x), int(y)))
+        if hwnd:
+            try:
+                return auto.ControlFromHandle(hwnd)
+            except Exception:
+                pass
+        return auto.ControlFromPoint(x, y)
+
+
 def deepest_at_point(x, y):
-    """全树遍历找"矩形包含 (x,y)"的最深控件（微信 DirectUI 命中测试/中间层矩形不可靠）。"""
+    """全树遍历模式（微信 DirectUI）：WindowFromPoint 拿窗口 → 从句柄全树遍历，
+    自己用 BoundingRectangle 判断"矩形包含该点"的最深控件（不依赖 provider 的命中回答）。"""
     import win32gui
     hwnd = win32gui.WindowFromPoint((int(x), int(y)))
     if not hwnd:
