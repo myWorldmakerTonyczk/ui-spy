@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['ui_spy.py'],
+    ['src/ui_spy.py'],
     pathex=[],
     binaries=[],
     datas=[],

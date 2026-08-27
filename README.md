@@ -18,7 +18,7 @@
 
 ```bash
 # 源码运行（需 Python 3.10+，安装 uiautomation）
-python ui_spy.py
+python src/ui_spy.py
 
 # 或直接运行打包好的 exe
 ui-spy.exe
@@ -35,5 +35,5 @@ ui-spy.exe
 
 ```bash
 pip install pyinstaller uiautomation
-pyinstaller --onefile --windowed --name ui-spy ui_spy.py
+pyinstaller --onefile --windowed --name ui-spy src/ui_spy.py
 ```
