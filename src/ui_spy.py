@@ -140,9 +140,9 @@ class SpyApp:
         self.top_only_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(mode_frame, text="锁定顶层窗口", variable=self.top_only_var).pack(side='left')
         tk.Label(mode_frame, text=" 匹配:", font=('Microsoft YaHei', 9)).pack(side='left')
-        self.mode_var = tk.StringVar(value="命中测试")
+        self.mode_var = tk.StringVar(value="自动")
         ttk.Combobox(mode_frame, textvariable=self.mode_var, state='readonly',
-                     values=("命中测试", "全树遍历"), width=8,
+                     values=("自动", "命中测试", "全树遍历"), width=8,
                      font=('Microsoft YaHei', 9)).pack(side='left')
         self.target_btn = tk.Button(bottom, text="🔍", font=('Segoe UI Emoji', 11),
                                     width=3, cursor='hand2')

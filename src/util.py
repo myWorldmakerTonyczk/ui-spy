@@ -99,6 +99,33 @@ def hit_test_at_point(x, y):
         return auto.ControlFromPoint(x, y)
 
 
+def _is_top_level(c):
+    """控件是否是顶层窗口（即它自己就是那棵树的根）。"""
+    if c is None:
+        return True
+    try:
+        top = c.GetTopLevelControl()
+        return getattr(c, 'NativeWindowHandle', 0) == getattr(top, 'NativeWindowHandle', 0)
+    except Exception:
+        return False
+
+
+def auto_at_point(x, y):
+    """自动模式：先命中测试；若只命中顶层窗口（provider 失效或子控件不在这条路上），
+    再试全树遍历，取能下钻的那个结果。"""
+    hit = None
+    try:
+        hit = auto.ControlFromPoint(x, y)
+    except Exception:
+        hit = None
+    if hit is not None and not _is_top_level(hit):
+        return hit                       # 命中测试直接命中具体控件 → 用它
+    walk = deepest_at_point(x, y)        # 命中测试失效 → 全树遍历兜底
+    if not _is_top_level(walk):
+        return walk
+    return hit if hit is not None else walk
+
+
 def deepest_at_point(x, y):
     """全树遍历模式（微信 DirectUI）：WindowFromPoint 拿窗口 → 从句柄全树遍历，
     自己用 BoundingRectangle 判断"矩形包含该点"的最深控件（不依赖 provider 的命中回答）。"""
