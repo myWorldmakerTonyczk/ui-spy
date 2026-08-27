@@ -85,8 +85,8 @@ class SpyApp:
         self.root = tk.Tk()
         self.root.title("控件查询")
         self.root.attributes('-topmost', True)
-        self.root.geometry("520x620")
-        self.root.minsize(520, 620)
+        self.root.geometry("660x620")
+        self.root.minsize(660, 620)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.screen_h = self.root.winfo_screenheight()
 
@@ -247,7 +247,7 @@ class SpyApp:
         rows = self._visible_count(self.tree.get_children())
         h = rows * 20 + 300
         h = max(620, min(h, self.screen_h - 120))
-        self.root.geometry(f"520x{h}")
+        self.root.geometry(f"660x{h}")
         self.root.update_idletasks()
 
     def _insert_node(self, parent_iid, c):
