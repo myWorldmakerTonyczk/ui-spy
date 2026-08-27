@@ -18,3 +18,6 @@ ui-spy.exe
 
 # IDE
 .idea/
+
+# uiautomation 运行日志
+@AutomationLog.txt
