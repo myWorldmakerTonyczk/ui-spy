@@ -85,18 +85,8 @@ def find_path_child(kids, source):
 
 
 def hit_test_at_point(x, y):
-    """命中测试模式（普通应用）：用 UIA 自带的 ElementFromPoint，provider 直接回答该点是什么。"""
-    try:
-        return auto.ControlFromPoint(x, y)
-    except Exception:
-        import win32gui
-        hwnd = win32gui.WindowFromPoint((int(x), int(y)))
-        if hwnd:
-            try:
-                return auto.ControlFromHandle(hwnd)
-            except Exception:
-                pass
-        return auto.ControlFromPoint(x, y)
+    """命中测试模式（普通应用）：纯 UIA 命中测试，provider 回答什么就是什么，不做兜底。"""
+    return auto.ControlFromPoint(x, y)
 
 
 def _is_top_level(c):
@@ -127,16 +117,16 @@ def auto_at_point(x, y):
 
 
 def deepest_at_point(x, y):
-    """全树遍历模式（微信 DirectUI）：WindowFromPoint 拿窗口 → 从句柄全树遍历，
-    自己用 BoundingRectangle 判断"矩形包含该点"的最深控件（不依赖 provider 的命中回答）。"""
+    """全树遍历模式（微信 DirectUI）：WindowFromPoint → ControlFromHandle → 全树遍历，
+    自己用 BoundingRectangle 判断"矩形包含该点"的最深控件。纯遍历，不做命中测试兜底。"""
     import win32gui
     hwnd = win32gui.WindowFromPoint((int(x), int(y)))
     if not hwnd:
-        return auto.ControlFromPoint(x, y)
+        return None
     try:
         w = auto.ControlFromHandle(hwnd)
     except Exception:
-        return auto.ControlFromPoint(x, y)
+        return None
     best, bd = w, -1
     try:
         for c, depth in auto.WalkControl(w, maxDepth=40):

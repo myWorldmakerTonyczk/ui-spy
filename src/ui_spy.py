@@ -205,6 +205,8 @@ class SpyApp:
         ctypes.windll.user32.ShowCursor(True)
         try:
             c = service.lock_control(x, y, self.top_only_var.get(), self.mode_var.get())
+            if c is None:
+                raise LookupError("未匹配到控件（该模式下没有命中任何控件）")
             self.root_control = c
             self.hl_path = [c]       # 控制线路起点 = 来源控件
             self._build_tree(c)
