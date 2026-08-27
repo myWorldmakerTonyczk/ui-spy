@@ -85,8 +85,9 @@ class SpyApp:
         self.root = tk.Tk()
         self.root.title("控件查询")
         self.root.attributes('-topmost', True)
-        self.root.geometry("660x620")
-        self.root.minsize(660, 620)
+        self.root.geometry("780x620")
+        self.root.minsize(780, 620)          # 宽度固定 + 高度最小 620
+        self.root.resizable(False, True)     # 宽度不可调，高度可调（自适应控制）
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.screen_h = self.root.winfo_screenheight()
 
@@ -107,7 +108,7 @@ class SpyApp:
         self.tree_frame.pack(fill='both', expand=True, padx=8, pady=(8, 4))
         self.tree = ttk.Treeview(self.tree_frame, show='tree', selectmode='browse')
         self.tree.heading('#0', text='控件')
-        self.tree.column('#0', width=490, anchor='w')
+        self.tree.column('#0', width=700, anchor='w')
         for ct, color in TYPE_COLORS.items():
             self.tree.tag_configure(ct, foreground=color)
         self.tree.tag_configure('route', background=ROUTE_COLOR, foreground='#000000')
@@ -248,8 +249,8 @@ class SpyApp:
     def _autosize(self):
         rows = self._visible_count(self.tree.get_children())
         h = rows * 20 + 300
-        h = max(620, min(h, self.screen_h - 120))
-        self.root.geometry(f"660x{h}")
+        h = max(620, min(h, self.screen_h - 120))   # 高度自适应：最小 620，最大屏高-120
+        self.root.geometry(f"780x{h}")
         self.root.update_idletasks()
 
     def _insert_node(self, parent_iid, c):
