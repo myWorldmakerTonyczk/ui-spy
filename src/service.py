@@ -66,6 +66,8 @@ def control_details(c):
         ("名称", repr(s('Name'))),
         ("类名", repr(s('ClassName'))),
         ("AutomationId", repr(s('AutomationId'))),
-        ("句柄", f"{hex(hwnd) if hwnd else '0'}  线程:{thread}  进程:{pid}"),
+        ("句柄", hex(hwnd) if hwnd else '0'),
+        ("线程", str(thread)),
+        ("进程", str(pid)),
         ("矩形", f"({r.left},{r.top},{r.right},{r.bottom})  {r.width()}x{r.height()}"),
     ]

@@ -85,8 +85,8 @@ class SpyApp:
         self.root = tk.Tk()
         self.root.title("控件查询")
         self.root.attributes('-topmost', True)
-        self.root.geometry("780x620")
-        self.root.minsize(780, 620)          # 宽度固定 + 高度最小 620
+        self.root.geometry("780x660")
+        self.root.minsize(780, 660)          # 宽度固定 + 高度最小 660
         self.root.resizable(False, True)     # 宽度不可调，高度可调（自适应控制）
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.screen_h = self.root.winfo_screenheight()
@@ -128,8 +128,14 @@ class SpyApp:
         self.details.tag_configure('lbl', font=('Microsoft YaHei', 11, 'bold'),
                                    foreground='#7b7b7b')
         self.details.tag_configure('val', font=('Microsoft YaHei', 12),
-                                   foreground='#111')
-        self.details.insert('end', "拖到目标控件上，或点🔍开始", 'lbl')
+                                   foreground='#111')   # 值不加框，纯文字
+        intro = ("【控件查询工具】\n"
+                 "① 按住 🔍 拖到任意窗口的控件上松开 → 锁定该控件\n"
+                 "② 下方树状展示控件层级，点节点看详情 + 亮边框\n"
+                 "③ ↑父 / ⤒顶 逐级上溯控制线路，可折叠重复层\n"
+                 "④ 顶部搜索框按名称搜索，命中绿色高亮\n"
+                 "⑤ 复制：导出详情 + 树状结构文本")
+        self.details.insert('end', intro, 'lbl')
         self.details.configure(state='disabled')
 
         # ---------- 底部 ----------
@@ -249,7 +255,7 @@ class SpyApp:
     def _autosize(self):
         rows = self._visible_count(self.tree.get_children())
         h = rows * 20 + 300
-        h = max(620, min(h, self.screen_h - 120))   # 高度自适应：最小 620，最大屏高-120
+        h = max(660, min(h, self.screen_h - 120))   # 高度自适应：最小 660，最大屏高-120
         self.root.geometry(f"780x{h}")
         self.root.update_idletasks()
 
@@ -493,7 +499,8 @@ class SpyApp:
         self.details.delete('1.0', 'end')
         for lbl, val in service.control_details(c):
             self.details.insert('end', f"{lbl}: ", 'lbl')
-            self.details.insert('end', f"{val}\n", 'val')
+            self.details.insert('end', val, 'val')
+            self.details.insert('end', "\n")
         self.details.configure(state='disabled')
 
     def copy_info(self):
