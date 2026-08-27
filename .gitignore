@@ -15,3 +15,6 @@ ui-spy.exe
 
 # venv
 .venv*/
+
+# IDE
+.idea/

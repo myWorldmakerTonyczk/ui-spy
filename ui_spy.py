@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
-"""控件查询工具：点住🔍拖到目标控件上松开 → 锁定；控件单列树状展示（按类型配色、层级缩进清晰）；
-↑父 上溯并展开父的全部子+高亮来源子；⤒顶 一键跳到顶层窗口，逐级展开、每层高亮路径上的那个；
-可选"锁定顶层窗口"模式；详情含句柄/线程/进程；锁定显示黄色边框 0.5 秒。
+"""UI 层：控件查询工具界面（Tkinter）。
+
+点住🔍拖到目标控件上松开 → 锁定；控件树状展示（按类型配色、折叠重复层）；
+↑父 / ⤒顶 累积控制线路；搜索框高亮匹配；详情含句柄/线程/进程。
+业务逻辑见 service.py，底层函数见 util.py。
 用法:  .venv/Scripts/python.exe ui_spy.py   (或打包成 exe)
 """
 import ctypes
@@ -14,6 +16,9 @@ if sys.stdout is not None:
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 import tkinter as tk
+
+import util
+import service
 
 LOG_PATH = os.path.join(os.path.dirname(sys.executable), 'spy_error.log')
 
@@ -38,12 +43,12 @@ except Exception:
 GWL_EXSTYLE = -20
 WS_EX_TRANSPARENT = 0x20
 VK_LBUTTON = 0x01
-GA_ROOT = 2
 BORDER_MS = 500
 BORDER_COLOR = '#ffd000'
 BORDER_THICK = 4
 MAG_COLOR = '#00c853'
 ROUTE_COLOR = '#ffe0b2'   # 路径/折叠节点颜色（浅橙）
+MATCH_COLOR = '#c8e6c9'   # 搜索命中色（绿）
 
 TYPE_COLORS = {
     'WindowControl': '#c62828',
@@ -57,7 +62,6 @@ TYPE_COLORS = {
     'TreeItemControl': '#2e7d32',
     'ImageControl': '#ff8f00',
 }
-DEFAULT_COLOR = '#37474f'
 
 
 class SpyApp:
@@ -65,9 +69,7 @@ class SpyApp:
         self.targeting = False
         self.border_wins = []
         self.controls = {}       # iid -> control
-        self.ctrl_key_to_iid = {}  # RuntimeId -> iid
         self.item_type = {}      # iid -> ControlTypeName
-        self._hl_iids = []
         self.hl_path = []        # 上溯累积的控制线路（来源+各级父）
         self._border_after = None
         self._collapse_runs = {}   # 折叠节点 iid -> (start, count)
@@ -75,16 +77,20 @@ class SpyApp:
         self._dup_shown = set()
         self._dup_children = {}
         self.root_control = None
+        self.route_only = False
+        self._cur_path = []
+        self._cur_source = None
+        self._cur_groups = []
 
         self.root = tk.Tk()
         self.root.title("控件查询")
         self.root.attributes('-topmost', True)
         self.root.geometry("520x620")
-        self.root.minsize(520, 620)   # 最小窗口，最大不限制
+        self.root.minsize(520, 620)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.screen_h = self.root.winfo_screenheight()
 
-        # ---------- 顶部搜索框（从树根往下搜，高亮匹配） ----------
+        # ---------- 顶部搜索框 ----------
         self.search_var = tk.StringVar()
         search_frame = tk.Frame(self.root)
         search_frame.pack(fill='x', padx=8, pady=(8, 0))
@@ -95,9 +101,8 @@ class SpyApp:
         search_entry.bind('<KeyRelease>', self._on_search)
         tk.Button(search_frame, text="清空", width=4, font=('Microsoft YaHei', 9),
                   command=self._clear_search).pack(side='left', padx=(4, 0))
-        self.route_only = False   # 是否只显示主线路
 
-        # ---------- 控件树（单列，层级缩进清晰） ----------
+        # ---------- 控件树 ----------
         self.tree_frame = tk.Frame(self.root)
         self.tree_frame.pack(fill='both', expand=True, padx=8, pady=(8, 4))
         self.tree = ttk.Treeview(self.tree_frame, show='tree', selectmode='browse')
@@ -105,8 +110,8 @@ class SpyApp:
         self.tree.column('#0', width=490, anchor='w')
         for ct, color in TYPE_COLORS.items():
             self.tree.tag_configure(ct, foreground=color)
-        self.tree.tag_configure('route', background=ROUTE_COLOR, foreground='#000000')  # 路径/折叠节点色
-        self.tree.tag_configure('match', background='#c8e6c9', foreground='#1b5e20')    # 搜索命中色（绿）
+        self.tree.tag_configure('route', background=ROUTE_COLOR, foreground='#000000')
+        self.tree.tag_configure('match', background=MATCH_COLOR, foreground='#1b5e20')
         self.tree.pack(side='left', fill='both', expand=True)
         sb = ttk.Scrollbar(self.tree_frame, orient='vertical', command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
@@ -115,7 +120,7 @@ class SpyApp:
         self.tree.bind('<<TreeviewSelect>>', self._on_tree_select)
         self.tree.bind('<MouseWheel>', lambda e: self._refresh_fold_buttons())
 
-        # ---------- 详情（标签粗体、值正常，字号加大） ----------
+        # ---------- 详情 ----------
         self.details = tk.Text(self.root, height=8, bg='#f5f5f5', relief='sunken',
                                font=('Microsoft YaHei', 11), padx=6, pady=4)
         self.details.pack(fill='x', padx=8, pady=2)
@@ -155,6 +160,7 @@ class SpyApp:
 
         self.root.mainloop()
 
+    # ---------- 放大镜 / 点击穿透 ----------
     def _draw_mag(self, cv):
         cv.create_oval(5, 5, 28, 28, outline=MAG_COLOR, width=3)
         cv.create_line(26, 26, 37, 37, fill=MAG_COLOR, width=5)
@@ -191,12 +197,7 @@ class SpyApp:
         self.mag.withdraw()
         ctypes.windll.user32.ShowCursor(True)
         try:
-            if self.top_only_var.get():
-                import win32gui
-                hwnd = win32gui.WindowFromPoint((int(x), int(y)))
-                c = auto.ControlFromHandle(hwnd) if hwnd else auto.ControlFromPoint(x, y)
-            else:
-                c = self._deepest_at_point(x, y)
+            c = service.lock_control(x, y, self.top_only_var.get())
             self.root_control = c
             self.hl_path = [c]       # 控制线路起点 = 来源控件
             self._build_tree(c)
@@ -205,65 +206,26 @@ class SpyApp:
             self.root.after(BORDER_MS, self.hide_border)
         except Exception as e:
             log(f"取控件失败: {type(e).__name__}: {e}")
-            self.details_var.set(f"锁定失败: {e}")
-
-    def _deepest_at_point(self, x, y):
-        """全树遍历找"矩形包含 (x,y)"的最深控件（微信 DirectUI 命中测试/中间层矩形不可靠）。"""
-        import win32gui
-        hwnd = win32gui.WindowFromPoint((int(x), int(y)))
-        if not hwnd:
-            return auto.ControlFromPoint(x, y)
-        try:
-            w = auto.ControlFromHandle(hwnd)
-        except Exception:
-            return auto.ControlFromPoint(x, y)
-        best, bd = w, -1
-        try:
-            for c, depth in auto.WalkControl(w, maxDepth=40):
-                try:
-                    r = c.BoundingRectangle
-                except Exception:
-                    continue
-                if r.width() > 0 and r.height() > 0 and \
-                        r.left <= x <= r.right and r.top <= y <= r.bottom:
-                    if depth > bd:
-                        best, bd = c, depth
-        except Exception:
-            pass
-        return best
+            self.details.configure(state='normal')
+            self.details.delete('1.0', 'end')
+            self.details.insert('end', f"锁定失败: {e}", 'lbl')
+            self.details.configure(state='disabled')
 
     # ---------- 树 ----------
-    def _ctrl_key(self, c):
-        """控件的稳定身份 key。RuntimeId 在此版本不存在，改用 矩形+类型+名称
-        （同元素不同方式获取，几何信息一致，可稳定匹配）。"""
-        try:
-            r = c.BoundingRectangle
-            return ('geo', c.ControlTypeName, c.Name or '',
-                    r.left, r.top, r.width(), r.height())
-        except Exception:
-            return ('id', id(c))
-
-    def _iid_of(self, c):
-        return self.ctrl_key_to_iid.get(self._ctrl_key(c))
-
     def _build_tree(self, c):
         self.tree.delete(*self.tree.get_children())
         self.controls = {}
-        self.ctrl_key_to_iid = {}
         self.item_type = {}
-        self._hl_iids = []
         self.hl_path = []
         self.root_control = c
         self._insert_node('', c)
         try:
-            root_item = self.tree.get_children()[0]
-            self.tree.item(root_item, open=True)
+            self.tree.item(self.tree.get_children()[0], open=True)
         except Exception:
             pass
         self._autosize()
 
     def _visible_count(self, iids):
-        """统计树里可见（含展开的）行数。"""
         n = 0
         for i in iids:
             n += 1
@@ -275,9 +237,8 @@ class SpyApp:
         return n
 
     def _autosize(self):
-        """窗口高度自适应树内容：内容高就拉长，超屏交给滚动条；最小不低于 620（保证图标完整）。"""
         rows = self._visible_count(self.tree.get_children())
-        h = rows * 20 + 300   # 树区 + 详情/按钮/边距
+        h = rows * 20 + 300
         h = max(620, min(h, self.screen_h - 120))
         self.root.geometry(f"520x{h}")
         self.root.update_idletasks()
@@ -285,17 +246,8 @@ class SpyApp:
     def _insert_node(self, parent_iid, c):
         iid = f'c{id(c)}'
         ct = c.ControlTypeName
-        nm = ''
-        try:
-            nm = c.Name or ''
-        except Exception:
-            pass
-        if len(nm) > 40:
-            nm = nm[:40] + '…'
-        label = ct + (f"  '{nm}'" if nm else '')
-        self.tree.insert(parent_iid, 'end', iid=iid, text=label, tags=(ct,))
+        self.tree.insert(parent_iid, 'end', iid=iid, text=util.label_text(c), tags=(ct,))
         self.controls[iid] = c
-        self.ctrl_key_to_iid[self._ctrl_key(c)] = iid
         self.item_type[iid] = ct
         try:
             if c.GetChildren():
@@ -305,7 +257,6 @@ class SpyApp:
         return iid
 
     def _open_node(self, iid):
-        """加载并展开该节点的所有直接子控件（已加载过则跳过）。"""
         c = self.controls.get(iid)
         if c is None:
             return
@@ -333,8 +284,8 @@ class SpyApp:
             return
         self._open_node(iid)
 
+    # ---------- 折叠节点 + 按钮 ----------
     def _place_fold_buttons(self):
-        """为每个折叠节点在文字右侧放一个 + 按钮（挨着文字，非行最右）。"""
         for b, _ in self._dup_buttons:
             try:
                 b.destroy()
@@ -356,7 +307,6 @@ class SpyApp:
             self._dup_buttons.append((btn, iid))
 
     def _refresh_fold_buttons(self):
-        """树滚动/缩放后把 + 按钮挪到文字右边。"""
         for btn, iid in self._dup_buttons:
             try:
                 bbox = self.tree.bbox(iid)
@@ -367,7 +317,6 @@ class SpyApp:
                           width=16, height=max(bbox[3], 16))
 
     def _toggle_duplicates(self, iid):
-        """点 + 按钮：在折叠节点下切换展开/收起重复层。"""
         info = self._collapse_runs.get(iid)
         if not info:
             return
@@ -387,12 +336,12 @@ class SpyApp:
         else:
             top_iid = None
             cur_parent = iid
-            for idx in range(s + cnt - 1, s - 1, -1):   # 顶部→底部 逐个嵌套
+            for idx in range(s + cnt - 1, s - 1, -1):
                 miid = self._ins_node(cur_parent, path[idx], True)
                 if top_iid is None:
                     top_iid = miid
                 cur_parent = miid
-            self.tree.move(top_iid, iid, 0)   # 移到最前面，续在延续节点上方
+            self.tree.move(top_iid, iid, 0)
             self._dup_children[iid] = [top_iid]
             self._dup_shown.add(iid)
             for b, bi in self._dup_buttons:
@@ -405,7 +354,6 @@ class SpyApp:
         c = self.controls.get(iid)
         if c is not None:
             self._show_details(c)
-            # 点哪个节点，哪个控件边框亮 1 秒
             try:
                 r = c.BoundingRectangle
                 if r.width() > 0 and r.height() > 0:
@@ -421,90 +369,14 @@ class SpyApp:
         c = self.controls.get(iid)
         return c if c is not None else self.root_control
 
-    def _highlight(self, controls):
-        """清除旧高亮；给指定控件打上黄底黑字高亮 tag（与类型配色区分开）。"""
-        for iid in self._hl_iids:
-            try:
-                self.tree.item(iid, tags=(self.item_type.get(iid, ''),))
-            except Exception:
-                pass
-        self._hl_iids = []
-        for c in controls:
-            iid = self._iid_of(c)
-            if iid:
-                try:
-                    self.tree.item(iid, tags=('hl',))
-                    self._hl_iids.append(iid)
-                    self.tree.see(iid)
-                except Exception:
-                    pass
-
-    def _label_text(self, c):
-        nm = ''
-        try:
-            nm = c.Name or ''
-        except Exception:
-            pass
-        if len(nm) > 40:
-            nm = nm[:40] + '…'
-        return c.ControlTypeName + (f"  '{nm}'" if nm else '')
-
-    def _same_wrapper(self, a, b):
-        """类型/名称/类名 是否都相同。"""
-        try:
-            return (a.ControlTypeName == b.ControlTypeName
-                    and (a.Name or '') == (b.Name or '')
-                    and (a.ClassName or '') == (b.ClassName or ''))
-        except Exception:
-            return False
-
-    def _single_child_chain(self, child, parent):
-        """child 是否是 parent 的唯一子控件。"""
-        try:
-            return len(parent.GetChildren()) == 1
-        except Exception:
-            return False
-
-    def _collapse_groups(self, path):
-        """折叠路径上连续"类型/名称/类名相同 且 单子链"的层。返回 [(start_idx, count)]。"""
-        if not path:
-            return []
-        groups = []
-        n = len(path)
-        i = 0
-        while i < n:
-            j = i
-            while j + 1 < n and self._same_wrapper(path[j], path[j + 1]) \
-                    and self._single_child_chain(path[j], path[j + 1]):
-                j += 1
-            groups.append((i, j - i + 1))
-            i = j + 1
-        return groups
-
-    def _open_children_route(self, iid):
-        """加载并展开该节点（即其"子控件来源"）的全部直接子控件。"""
-        c = self.controls.get(iid)
-        if c is None:
-            return
-        for ch in self.tree.get_children(iid):
-            if ch.endswith('_ph'):
-                self.tree.delete(ch)
-        try:
-            for k in c.GetChildren():
-                self._insert_node(iid, k)
-        except Exception:
-            pass
-        self.tree.item(iid, open=True)
-
+    # ---------- 控制线路渲染 ----------
     def _render_route(self):
-        """按 hl_path 渲染完整树：路径节点橙色标记 + 折叠相同单子链（×N），
-        折叠节点可点击展开显示重复项；每层兄弟分支照常显示。顶层窗口不高亮。"""
         path = self.hl_path
         if not path:
             return
         self._cur_path = path
         self._cur_source = path[0]
-        self._cur_groups = self._collapse_groups(path)
+        self._cur_groups = util.collapse_groups(path)
         self._collapse_runs = {}
         self._dup_buttons = []
         self._dup_shown = set()
@@ -512,32 +384,28 @@ class SpyApp:
         groups = self._cur_groups
         self.tree.delete(*self.tree.get_children())
         self.controls = {}
-        self.ctrl_key_to_iid = {}
         self.item_type = {}
-        self._hl_iids = []
 
         # 顶层组（不高亮）
         self.root_control = path[groups[-1][0] + groups[-1][1] - 1]
         root_iid = self._ins_node('', self.root_control, False)
         if groups[-1][1] > 1:
-            self.tree.item(root_iid, text=self._label_text(self.root_control) + f'  ×{groups[-1][1]}')
+            self.tree.item(root_iid, text=util.label_text(self.root_control) + f'  ×{groups[-1][1]}')
         self.tree.item(root_iid, open=True)
         self._render_level(root_iid, path[groups[-1][0]], len(groups) - 2)
         self._autosize()
         self._place_fold_buttons()
 
     def _ins_node(self, parent_iid, c, mark):
-        """插入一个节点；mark=True 用路径色（橙），否则用类型色。"""
         iid = f'c{id(c)}'
         tags = ('route',) if mark else (c.ControlTypeName,)
         self.tree.insert(parent_iid, 'end', iid=iid,
-                         text=self._label_text(c), tags=tags)
+                         text=util.label_text(c), tags=tags)
         self.controls[iid] = c
         self.item_type[iid] = c.ControlTypeName
         return iid
 
     def _ins_lazy(self, parent_iid, c):
-        """插入一个可见节点，子控件懒加载（占位）。"""
         iid = self._ins_node(parent_iid, c, False)
         try:
             if c.GetChildren():
@@ -546,7 +414,6 @@ class SpyApp:
             pass
 
     def _render_level(self, parent_iid, c, gi):
-        """渲染控件 c 的所有子。gi = 下一组（路径）的索引；-1 表示不再有路径层。"""
         path = self._cur_path
         source = self._cur_source
         groups = self._cur_groups
@@ -558,49 +425,25 @@ class SpyApp:
             return
         path_child = None
         if gi >= 0:
-            path_child = self._find_path_child(kids, source)
+            path_child = util.find_path_child(kids, source)
         for k in kids:
             if path_child is not None and k is path_child:
                 s, cnt = groups[gi]
-                iid = self._ins_node(parent_iid, k, True)   # 路径节点：橙色
+                iid = self._ins_node(parent_iid, k, True)
                 if cnt > 1:
-                    # 只折叠重复层（×N），下面路径延续照常展开显示；右侧 + 按钮展开重复项
-                    self.tree.item(iid, text=self._label_text(k) + f'  ×{cnt}')
+                    # 只折叠重复层（×N），路径延续自动可见；右侧 + 按钮展开重复项
+                    self.tree.item(iid, text=util.label_text(k) + f'  ×{cnt}')
                     self._collapse_runs[iid] = (s, cnt)
                     self.tree.item(iid, open=True)
-                    self._render_level(iid, path[s], gi - 1)  # 路径延续自动可见
+                    self._render_level(iid, path[s], gi - 1)
                 else:
                     self.tree.item(iid, open=True)
                     self._render_level(iid, path[s], gi - 1)
             else:
                 if not self.route_only:
-                    self._ins_lazy(parent_iid, k)           # 兄弟分支：仅完整模式显示
-
-
-    def _find_path_child(self, kids, source):
-        """在给定子控件列表里，找"矩形完整包含来源控件且面积最小"的那个（路径向下的一层）。"""
-        best = None
-        best_area = None
-        try:
-            sr = source.BoundingRectangle
-        except Exception:
-            return None
-        for k in kids:
-            try:
-                r = k.BoundingRectangle
-            except Exception:
-                continue
-            if r.width() <= 0 or r.height() <= 0:
-                continue
-            if r.left <= sr.left and r.right >= sr.right \
-                    and r.top <= sr.top and r.bottom >= sr.bottom:
-                area = r.width() * r.height()
-                if best_area is None or area < best_area:
-                    best, best_area = k, area
-        return best
+                    self._ins_lazy(parent_iid, k)   # 兄弟分支：仅完整模式显示
 
     def go_parent(self):
-        """上溯一级：父加入控制线路并重新渲染（折叠相同单子链层）。"""
         old_root = self.root_control
         if old_root is None:
             return
@@ -622,72 +465,28 @@ class SpyApp:
         self._show_details(old_root)
 
     def go_top(self):
-        """一键跳到控件自己的顶层窗口，整条控制线路折叠渲染。"""
         current = self._current_control()
         if current is None:
             return
-        chain = []
-        c = current
-        while c is not None:
-            chain.append(c)
-            try:
-                if c.NativeWindowHandle:
-                    break
-            except Exception:
-                pass
-            try:
-                c = c.GetParentControl()
-            except Exception:
-                break
-        self.hl_path = list(chain)   # [来源, ..., 顶层窗口]
+        self.hl_path = util.path_to_top(current)   # [来源, ..., 顶层窗口]
         self._render_route()
         self._show_details(current)
 
-    # ---------- 详情 ----------
-    def _window_info(self, c):
-        import win32gui
-        import win32process
-        hwnd, thread, pid = 0, 0, 0
-        try:
-            r = c.BoundingRectangle
-            if r.width() > 0 and r.height() > 0:
-                x = r.left + r.width() // 2
-                y = r.top + r.height() // 2
-                h = win32gui.WindowFromPoint((int(x), int(y)))
-                if h:
-                    h = win32gui.GetAncestor(h, GA_ROOT)
-                    hwnd = h
-                    thread, pid = win32process.GetWindowThreadProcessId(h)
-        except Exception:
-            pass
-        return hwnd, thread, pid
+    def toggle_route(self):
+        self.route_only = not self.route_only
+        self.route_btn.config(text='全树' if self.route_only else '线路')
+        self._render_route()
 
+    # ---------- 详情 / 复制 ----------
     def _show_details(self, c):
-        def s(attr):
-            try:
-                return getattr(c, attr) or ''
-            except Exception:
-                return ''
-
-        r = c.BoundingRectangle
-        hwnd, thread, pid = self._window_info(c)
-        items = [
-            ("类型", c.ControlTypeName),
-            ("名称", repr(s('Name'))),
-            ("类名", repr(s('ClassName'))),
-            ("AutomationId", repr(s('AutomationId'))),
-            ("句柄", f"{hex(hwnd) if hwnd else '0'}  线程:{thread}  进程:{pid}"),
-            ("矩形", f"({r.left},{r.top},{r.right},{r.bottom})  {r.width()}x{r.height()}"),
-        ]
         self.details.configure(state='normal')
         self.details.delete('1.0', 'end')
-        for lbl, val in items:
-            self.details.insert('end', f"{lbl}: ", 'lbl')   # 标签粗体灰
-            self.details.insert('end', f"{val}\n", 'val')    # 值正常黑
+        for lbl, val in service.control_details(c):
+            self.details.insert('end', f"{lbl}: ", 'lbl')
+            self.details.insert('end', f"{val}\n", 'val')
         self.details.configure(state='disabled')
 
     def copy_info(self):
-        """复制：详情 + 当前树状结构。"""
         txt = self.details.get('1.0', 'end').strip()
         tree_txt = "\n".join(self._tree_text())
         full = txt + "\n\n--- 树状结构 ---\n" + tree_txt
@@ -696,14 +495,13 @@ class SpyApp:
             self.root.clipboard_append(full)
 
     def _tree_text(self):
-        """把当前树渲染成带连线的文本结构（完整名称，跳过懒加载占位）。"""
         lines = []
 
         def walk(parent, prefix):
             children = self.tree.get_children(parent)
             for i, iid in enumerate(children):
                 if iid.endswith('_ph'):
-                    continue                      # 跳过懒加载占位
+                    continue
                 c = self.controls.get(iid)
                 if c is not None:
                     nm = ''
@@ -726,13 +524,7 @@ class SpyApp:
         walk('', '')
         return lines
 
-    def toggle_route(self):
-        """切换：只显示主线路 / 完整树。"""
-        self.route_only = not self.route_only
-        self.route_btn.config(text='全树' if self.route_only else '线路')
-        self._render_route()
-
-    # ---------- 搜索（从树根往下，高亮匹配） ----------
+    # ---------- 搜索 ----------
     def _on_search(self, event):
         query = self.search_var.get()
         if query.strip():
@@ -745,28 +537,25 @@ class SpyApp:
         self._render_route()
 
     def _render_search(self, query):
-        q = query.lower()
         root = self.root_control
         if root is None:
             return
         self._search_count = 0
         self.tree.delete(*self.tree.get_children())
         self.controls = {}
-        self.ctrl_key_to_iid = {}
         self.item_type = {}
-        self._hl_iids = []
         self._collapse_runs = {}
         self._dup_buttons = []
         self._dup_shown = set()
         self._dup_children = {}
-        self._render_search_node('', root, q, 0)
+        self._render_search_node('', root, query, 0)
         self._autosize()
 
     def _ins_search_node(self, parent_iid, c, matched):
         iid = f'c{id(c)}'
         tags = ('match',) if matched else (c.ControlTypeName,)
         self.tree.insert(parent_iid, 'end', iid=iid,
-                         text=self._label_text(c), tags=tags)
+                         text=util.label_text(c), tags=tags)
         self.controls[iid] = c
         self.item_type[iid] = c.ControlTypeName
         return iid
@@ -775,12 +564,7 @@ class SpyApp:
         self._search_count += 1
         if self._search_count > 2000:   # 防爆
             return None, False
-        name = ''
-        try:
-            name = c.Name or ''
-        except Exception:
-            pass
-        matched = q in name.lower()
+        matched = service.matches_name(c, q)
         iid = self._ins_search_node(parent_iid, c, matched)
         if depth >= 14:
             return iid, matched
